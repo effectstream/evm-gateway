@@ -1,4 +1,5 @@
 import type { JsonRpcRequest, JsonRpcResponse } from '../types.js';
+import { getRpcClient } from '../poller/rpc-client.js';
 import { handleEthBlockNumber } from './handlers/eth-block-number.js';
 import { handleEthGetBlockByNumber } from './handlers/eth-get-block.js';
 import { handleEthGetLogs } from './handlers/eth-get-logs.js';
@@ -20,10 +21,6 @@ export async function handleRpcRequest(req: JsonRpcRequest): Promise<JsonRpcResp
     case 'eth_getLogs':
       return handleEthGetLogs(req);
     default:
-      return {
-        jsonrpc: '2.0',
-        id: req.id,
-        error: { code: -32601, message: 'Method not supported' },
-      };
+      return getRpcClient().forward(req);
   }
 }

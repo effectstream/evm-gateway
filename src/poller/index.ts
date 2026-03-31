@@ -3,6 +3,7 @@ import { logger } from '../utils.js';
 import { getLatestBlockNumber, setLatestBlockNumber } from '../db/chain-state.js';
 import { insertBlock } from '../db/blocks.js';
 import { insertLogs } from '../db/logs.js';
+import { pruneOldData } from '../db/prune.js';
 import { RpcClient } from './rpc-client.js';
 
 export class Poller {
@@ -12,7 +13,8 @@ export class Poller {
   constructor(
     private rpcClient: RpcClient,
     private contracts: ContractFilter[],
-    private pollIntervalMs: number
+    private pollIntervalMs: number,
+    private retentionBlocks: number = 700000
   ) {}
 
   start(): void {
@@ -56,9 +58,6 @@ export class Poller {
       const { parsed, rawJson } = result;
       await insertBlock({
         number: blockNum,
-        hash: parsed.hash,
-        parentHash: parsed.parentHash,
-        timestamp: parseInt(parsed.timestamp, 16),
         headerJson: rawJson,
       });
     }
@@ -76,13 +75,8 @@ export class Poller {
           const logRows = parsed.map((log: any, i: number) => ({
             blockNumber: parseInt(log.blockNumber, 16),
             logIndex: parseInt(log.logIndex, 16),
-            transactionHash: log.transactionHash,
-            transactionIndex: parseInt(log.transactionIndex, 16),
             address: log.address.toLowerCase(),
             topics: log.topics,
-            data: log.data,
-            removed: log.removed || false,
-            blockHash: log.blockHash,
             logJson: rawLogs[i],
           }));
           await insertLogs(logRows);
@@ -95,6 +89,9 @@ export class Poller {
 
     // Update chain state only after everything is stored
     await setLatestBlockNumber(currentBlock);
+
+    // Prune old data beyond retention window
+    await pruneOldData(currentBlock, this.retentionBlocks);
 
     const count = currentBlock - startBlock + 1;
     logger.info(`Synced blocks ${startBlock}-${currentBlock} (${count} new)`);

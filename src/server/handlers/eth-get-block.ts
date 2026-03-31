@@ -1,6 +1,7 @@
 import type { JsonRpcRequest, JsonRpcResponse } from '../../types.js';
-import { getLatestBlockNumber } from '../../db/chain-state.js';
+import { getLatestBlockNumber, getOldestBlockNumber } from '../../db/chain-state.js';
 import { getBlockByNumber } from '../../db/blocks.js';
+import { getRpcClient } from '../../poller/rpc-client.js';
 import { hexToNumber, sleep } from '../../utils.js';
 
 const MAX_WAIT_MS = 10_000;
@@ -28,6 +29,12 @@ export async function handleEthGetBlockByNumber(req: JsonRpcRequest): Promise<Js
     blockNumber = hexToNumber(blockParam);
   }
 
+  // If block is below cache floor, forward to upstream RPC
+  const oldest = await getOldestBlockNumber();
+  if (oldest !== null && blockNumber < oldest) {
+    return getRpcClient().forward(req);
+  }
+
   // Check if this block is way in the future (will never resolve)
   const latest = await getLatestBlockNumber();
   if (latest !== null && blockNumber > latest + 1000) {
@@ -41,11 +48,10 @@ export async function handleEthGetBlockByNumber(req: JsonRpcRequest): Promise<Js
     if (block) {
       return { jsonrpc: '2.0', id: req.id, result: JSON.parse(block.header_json) };
     }
-    // If block is behind what we've already synced, it's not coming
+    // If block is behind what we've already synced, it's not coming — forward to upstream
     const currentLatest = await getLatestBlockNumber();
     if (currentLatest !== null && blockNumber <= currentLatest) {
-      // We've synced past this block but don't have it — shouldn't happen, but return null
-      return { jsonrpc: '2.0', id: req.id, result: null };
+      return getRpcClient().forward(req);
     }
     await sleep(RETRY_MS);
   }

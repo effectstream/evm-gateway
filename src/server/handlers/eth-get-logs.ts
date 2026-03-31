@@ -1,6 +1,7 @@
 import type { JsonRpcRequest, JsonRpcResponse } from '../../types.js';
-import { getLatestBlockNumber } from '../../db/chain-state.js';
+import { getLatestBlockNumber, getOldestBlockNumber } from '../../db/chain-state.js';
 import { queryLogs } from '../../db/logs.js';
+import { getRpcClient } from '../../poller/rpc-client.js';
 import { hexToNumber, sleep } from '../../utils.js';
 
 const MAX_WAIT_MS = 10_000;
@@ -18,8 +19,14 @@ export async function handleEthGetLogs(req: JsonRpcRequest): Promise<JsonRpcResp
     return { jsonrpc: '2.0', id: req.id, error: { code: -32000, message: 'Cache not yet populated' } };
   }
 
-  let fromBlock = resolveBlockTag(filter.fromBlock, latest);
-  let toBlock = resolveBlockTag(filter.toBlock, latest);
+  const fromBlock = resolveBlockTag(filter.fromBlock, latest);
+  const toBlock = resolveBlockTag(filter.toBlock, latest);
+
+  // If range falls below cache floor, forward to upstream RPC
+  const oldest = await getOldestBlockNumber();
+  if (oldest !== null && fromBlock < oldest) {
+    return getRpcClient().forward(req);
+  }
 
   // If toBlock is ahead of what we have, wait for it
   if (toBlock > latest) {

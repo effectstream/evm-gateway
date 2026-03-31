@@ -15,7 +15,7 @@ async function main() {
   logger.info(`Database initialized at ${config.dbPath}`);
 
   const rpcClient = new RpcClient(config.rpcUrl);
-  const poller = new Poller(rpcClient, config.contracts, config.pollIntervalMs);
+  const poller = new Poller(rpcClient, config.contracts, config.pollIntervalMs, config.retentionBlocks);
   poller.start();
   logger.info(`Poller started (${config.pollIntervalMs}ms interval, ${config.contracts.length} contracts)`);
 

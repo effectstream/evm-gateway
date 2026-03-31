@@ -1,8 +1,19 @@
 import { trackRpcCall } from '../db/rpc-costs.js';
+import { trackForwardedCall } from '../db/rpc-forwards.js';
 import { logger } from '../utils.js';
+import type { JsonRpcRequest, JsonRpcResponse } from '../types.js';
+
+let instance: RpcClient;
+
+export function getRpcClient(): RpcClient {
+  if (!instance) throw new Error('RpcClient not initialized');
+  return instance;
+}
 
 export class RpcClient {
-  constructor(private rpcUrl: string) {}
+  constructor(private rpcUrl: string) {
+    instance = this;
+  }
 
   async getBlockNumber(): Promise<number> {
     const result = await this.call('eth_blockNumber') as string;
@@ -53,6 +64,21 @@ export class RpcClient {
       parsed: logs,
       rawLogs: logs.map((log: any) => JSON.stringify(log)),
     };
+  }
+
+  async forward(req: JsonRpcRequest): Promise<JsonRpcResponse> {
+    const body = { jsonrpc: '2.0', id: req.id, method: req.method, params: req.params || [] };
+    const res = await fetch(this.rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      return { jsonrpc: '2.0', id: req.id, error: { code: -32000, message: `Upstream RPC HTTP error: ${res.status}` } };
+    }
+    const json = await res.json() as JsonRpcResponse;
+    await trackForwardedCall(req.method);
+    return { jsonrpc: '2.0', id: req.id, result: json.result, error: json.error };
   }
 
   private async call(method: string, params: unknown[] = []): Promise<unknown> {
