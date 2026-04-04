@@ -62,12 +62,20 @@ export class Poller {
       });
     }
 
-    // Fetch and store logs for each contract over the full new range
+    // Group contracts by topic, then fetch logs with batched addresses per topic
+    const byTopic = new Map<string, string[]>();
     for (const contract of this.contracts) {
+      const addrs = byTopic.get(contract.topic) || [];
+      addrs.push(contract.address);
+      byTopic.set(contract.topic, addrs);
+    }
+
+    for (const [topic, addresses] of byTopic) {
       try {
+        const address = addresses.length === 1 ? addresses[0] : addresses;
         const { parsed, rawLogs } = await this.rpcClient.getLogs(
-          contract.address,
-          contract.topic,
+          address,
+          topic,
           startBlock,
           currentBlock
         );
@@ -80,10 +88,10 @@ export class Poller {
             logJson: rawLogs[i],
           }));
           await insertLogs(logRows);
-          logger.info(`Stored ${logRows.length} logs for ${contract.address} in blocks ${startBlock}-${currentBlock}`);
+          logger.info(`Stored ${logRows.length} logs for ${addresses.length} addresses in blocks ${startBlock}-${currentBlock}`);
         }
       } catch (err) {
-        logger.error(`Failed to fetch logs for ${contract.address}:`, err);
+        logger.error(`Failed to fetch logs for topic ${topic}:`, err);
       }
     }
 

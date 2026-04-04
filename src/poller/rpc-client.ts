@@ -38,7 +38,7 @@ export class RpcClient {
   }
 
   async getLogs(
-    address: string,
+    address: string | string[],
     topic: string,
     fromBlock: number,
     toBlock: number
