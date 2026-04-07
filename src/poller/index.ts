@@ -36,6 +36,7 @@ export class Poller {
       await this.doPoll();
     } catch (err) {
       logger.error('Poll cycle failed:', err);
+      process.exit(1);
     } finally {
       this.isRunning = false;
     }
