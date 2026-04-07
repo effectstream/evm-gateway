@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "dev:arb": "dotenv -e .env.arb -- tsx watch src/index.ts",
     "dev:arb-sep": "dotenv -e .env.arb-sep -- tsx watch src/index.ts",
     "dev:arb-main": "dotenv -e .env.arb-main -- tsx watch src/index.ts",
     "start:arb-sep": "dotenv -e .env.arb-sep -- tsx src/index.ts",

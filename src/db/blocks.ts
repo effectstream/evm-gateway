@@ -3,17 +3,14 @@ import type { BlockRow } from '../types.js';
 
 export async function insertBlock(block: {
   number: number;
-  hash: string;
-  parentHash: string;
-  timestamp: number;
   headerJson: string;
 }): Promise<void> {
   const db = getDb();
   await db.query(
-    `INSERT INTO blocks (number, hash, parent_hash, timestamp, header_json)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO blocks (number, header_json)
+     VALUES ($1, $2)
      ON CONFLICT (number) DO NOTHING`,
-    [block.number, block.hash, block.parentHash, block.timestamp, block.headerJson]
+    [block.number, block.headerJson]
   );
 }
 

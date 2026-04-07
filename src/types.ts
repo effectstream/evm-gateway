@@ -19,24 +19,15 @@ export interface ContractFilter {
 
 export interface BlockRow {
   number: string; // bigint comes as string from pglite
-  hash: string;
-  parent_hash: string;
-  timestamp: string;
   header_json: string;
-  created_at: string;
 }
 
 export interface LogRow {
   id: number;
   block_number: string;
   log_index: number;
-  transaction_hash: string;
-  transaction_index: number;
   address: string;
   topics: string[];
-  data: string;
-  removed: boolean;
-  block_hash: string;
   log_json: string;
 }
 
@@ -60,4 +51,5 @@ export interface AppConfig {
   port: number;
   dbPath: string;
   pollIntervalMs: number;
+  retentionBlocks: number;
 }

@@ -4,32 +4,22 @@ import type { LogRow } from '../types.js';
 export async function insertLogs(logs: Array<{
   blockNumber: number;
   logIndex: number;
-  transactionHash: string;
-  transactionIndex: number;
   address: string;
   topics: string[];
-  data: string;
-  removed: boolean;
-  blockHash: string;
   logJson: string;
 }>): Promise<void> {
   if (logs.length === 0) return;
   const db = getDb();
   for (const log of logs) {
     await db.query(
-      `INSERT INTO logs (block_number, log_index, transaction_hash, transaction_index, address, topics, data, removed, block_hash, log_json)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO logs (block_number, log_index, address, topics, log_json)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (block_number, log_index) DO NOTHING`,
       [
         log.blockNumber,
         log.logIndex,
-        log.transactionHash,
-        log.transactionIndex,
         log.address,
         log.topics,
-        log.data,
-        log.removed,
-        log.blockHash,
         log.logJson,
       ]
     );
