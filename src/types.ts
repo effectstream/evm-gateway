@@ -52,4 +52,5 @@ export interface AppConfig {
   dbPath: string;
   pollIntervalMs: number;
   retentionBlocks: number;
+  lookbackBlocks: number;
 }

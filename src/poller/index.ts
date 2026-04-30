@@ -14,7 +14,8 @@ export class Poller {
     private rpcClient: RpcClient,
     private contracts: ContractFilter[],
     private pollIntervalMs: number,
-    private retentionBlocks: number = 700000
+    private retentionBlocks: number = 700000,
+    private lookbackBlocks: number = 0
   ) {}
 
   start(): void {
@@ -45,7 +46,7 @@ export class Poller {
   private async doPoll(): Promise<void> {
     const currentBlock = await this.rpcClient.getBlockNumber();
     const lastKnown = await getLatestBlockNumber();
-    const startBlock = lastKnown !== null ? lastKnown + 1 : currentBlock;
+    const startBlock = lastKnown !== null ? lastKnown + 1 : currentBlock - this.lookbackBlocks;
 
     if (startBlock > currentBlock) return;
 

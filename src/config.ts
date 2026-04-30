@@ -8,6 +8,7 @@ export function loadConfig(): AppConfig {
   const dbPath = process.env.DB_PATH || './data/pgdata';
   const pollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || '1000', 10);
   const retentionBlocks = parseInt(process.env.RETENTION_BLOCKS || '700000', 10);
+  const lookbackBlocks = parseInt(process.env.LOOKBACK_BLOCKS || '0', 10);
 
   const contracts: ContractFilter[] = contractsRaw
     .split(',')
@@ -21,7 +22,7 @@ export function loadConfig(): AppConfig {
       return { address: address.toLowerCase(), topic: topic.toLowerCase() };
     });
 
-  return { networkName, rpcUrl, contracts, port, dbPath, pollIntervalMs, retentionBlocks };
+  return { networkName, rpcUrl, contracts, port, dbPath, pollIntervalMs, retentionBlocks, lookbackBlocks };
 }
 
 function requireEnv(key: string): string {
