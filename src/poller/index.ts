@@ -43,6 +43,8 @@ export class Poller {
     }
   }
 
+  private static BATCH_SIZE = 2000;
+
   private async doPoll(): Promise<void> {
     const currentBlock = await this.rpcClient.getBlockNumber();
     const lastKnown = await getLatestBlockNumber();
@@ -50,21 +52,43 @@ export class Poller {
 
     if (startBlock > currentBlock) return;
 
-    // Fetch and store block headers
-    for (let blockNum = startBlock; blockNum <= currentBlock; blockNum++) {
+    const totalBlocks = currentBlock - startBlock + 1;
+    if (totalBlocks > Poller.BATCH_SIZE) {
+      logger.info(`Backfilling ${totalBlocks} blocks (${startBlock}-${currentBlock})...`);
+    }
+
+    for (let batchStart = startBlock; batchStart <= currentBlock; batchStart += Poller.BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + Poller.BATCH_SIZE - 1, currentBlock);
+      await this.syncRange(batchStart, batchEnd);
+      await setLatestBlockNumber(batchEnd);
+
+      const synced = batchEnd - startBlock + 1;
+      const remaining = currentBlock - batchEnd;
+      if (remaining > 0) {
+        logger.info(`Synced blocks ${batchStart}-${batchEnd} (${synced}/${totalBlocks}, ${remaining} remaining)`);
+      }
+    }
+
+    await pruneOldData(currentBlock, this.retentionBlocks);
+
+    const count = currentBlock - startBlock + 1;
+    logger.info(`Synced blocks ${startBlock}-${currentBlock} (${count} new)`);
+  }
+
+  private async syncRange(startBlock: number, endBlock: number): Promise<void> {
+    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
       const result = await this.rpcClient.getBlockByNumber(blockNum);
       if (!result) {
         logger.warn(`Block ${blockNum} returned null from RPC`);
         continue;
       }
-      const { parsed, rawJson } = result;
+      const { rawJson } = result;
       await insertBlock({
         number: blockNum,
         headerJson: rawJson,
       });
     }
 
-    // Group contracts by topic, then fetch logs with batched addresses per topic
     const byTopic = new Map<string, string[]>();
     for (const contract of this.contracts) {
       const addrs = byTopic.get(contract.topic) || [];
@@ -79,7 +103,7 @@ export class Poller {
           address,
           topic,
           startBlock,
-          currentBlock
+          endBlock
         );
         if (parsed.length > 0) {
           const logRows = parsed.map((log: any, i: number) => ({
@@ -90,20 +114,11 @@ export class Poller {
             logJson: rawLogs[i],
           }));
           await insertLogs(logRows);
-          logger.info(`Stored ${logRows.length} logs for ${addresses.length} addresses in blocks ${startBlock}-${currentBlock}`);
+          logger.info(`Stored ${logRows.length} logs for ${addresses.length} addresses in blocks ${startBlock}-${endBlock}`);
         }
       } catch (err) {
         logger.error(`Failed to fetch logs for topic ${topic}:`, err);
       }
     }
-
-    // Update chain state only after everything is stored
-    await setLatestBlockNumber(currentBlock);
-
-    // Prune old data beyond retention window
-    await pruneOldData(currentBlock, this.retentionBlocks);
-
-    const count = currentBlock - startBlock + 1;
-    logger.info(`Synced blocks ${startBlock}-${currentBlock} (${count} new)`);
   }
 }
