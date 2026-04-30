@@ -75,18 +75,21 @@ export class Poller {
     logger.info(`Synced blocks ${startBlock}-${currentBlock} (${count} new)`);
   }
 
+  private static RPC_BATCH_SIZE = 50;
+
   private async syncRange(startBlock: number, endBlock: number): Promise<void> {
-    for (let blockNum = startBlock; blockNum <= endBlock; blockNum++) {
-      const result = await this.rpcClient.getBlockByNumber(blockNum);
-      if (!result) {
-        logger.warn(`Block ${blockNum} returned null from RPC`);
-        continue;
+    for (let i = startBlock; i <= endBlock; i += Poller.RPC_BATCH_SIZE) {
+      const batchEnd = Math.min(i + Poller.RPC_BATCH_SIZE - 1, endBlock);
+      const blockNums = Array.from({ length: batchEnd - i + 1 }, (_, k) => i + k);
+      const blocks = await this.rpcClient.getBlocksByNumber(blockNums);
+      for (const num of blockNums) {
+        const rawJson = blocks.get(num);
+        if (!rawJson) {
+          logger.warn(`Block ${num} returned null from RPC`);
+          continue;
+        }
+        await insertBlock({ number: num, headerJson: rawJson });
       }
-      const { rawJson } = result;
-      await insertBlock({
-        number: blockNum,
-        headerJson: rawJson,
-      });
     }
 
     const byTopic = new Map<string, string[]>();

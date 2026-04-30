@@ -37,6 +37,37 @@ export class RpcClient {
     return { parsed: json.result, rawJson: JSON.stringify(json.result) };
   }
 
+  async getBlocksByNumber(blockNumbers: number[]): Promise<Map<number, string>> {
+    const results = new Map<number, string>();
+    if (blockNumbers.length === 0) return results;
+
+    const batchBody = blockNumbers.map((num, i) => ({
+      jsonrpc: '2.0',
+      id: i,
+      method: 'eth_getBlockByNumber',
+      params: ['0x' + num.toString(16), false],
+    }));
+
+    const res = await fetch(this.rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(batchBody),
+    });
+    if (!res.ok) throw new Error(`RPC HTTP error: ${res.status}`);
+    const jsonArray = await res.json() as any[];
+
+    for (const json of jsonArray) {
+      if (json.error) throw new Error(`RPC error: ${JSON.stringify(json.error)}`);
+      if (json.result) {
+        const blockNum = parseInt(json.result.number, 16);
+        results.set(blockNum, JSON.stringify(json.result));
+      }
+      await trackRpcCall('eth_getBlockByNumber');
+    }
+
+    return results;
+  }
+
   async getLogs(
     address: string | string[],
     topic: string,
