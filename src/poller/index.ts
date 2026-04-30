@@ -57,15 +57,24 @@ export class Poller {
       logger.info(`Backfilling ${totalBlocks} blocks (${startBlock}-${currentBlock})...`);
     }
 
+    let lastBatchTime = Date.now();
     for (let batchStart = startBlock; batchStart <= currentBlock; batchStart += Poller.BATCH_SIZE) {
       const batchEnd = Math.min(batchStart + Poller.BATCH_SIZE - 1, currentBlock);
       await this.syncRange(batchStart, batchEnd);
       await setLatestBlockNumber(batchEnd);
 
+      const now = Date.now();
+      const batchMs = now - lastBatchTime;
+      lastBatchTime = now;
+
       const synced = batchEnd - startBlock + 1;
       const remaining = currentBlock - batchEnd;
       if (remaining > 0) {
-        logger.info(`Synced blocks ${batchStart}-${batchEnd} (${synced}/${totalBlocks}, ${remaining} remaining)`);
+        const batchesLeft = Math.ceil(remaining / Poller.BATCH_SIZE);
+        const etaMs = batchMs * batchesLeft;
+        const etaMin = Math.round(etaMs / 60000);
+        const etaSuffix = etaMin >= 10 ? `, ~${etaMin}min remaining` : '';
+        logger.info(`Synced blocks ${batchStart}-${batchEnd} (${synced}/${totalBlocks}, ${remaining} remaining${etaSuffix})`);
       }
     }
 
