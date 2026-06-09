@@ -1,7 +1,11 @@
 import { trackRpcCall } from '../db/rpc-costs.js';
 import { trackForwardedCall } from '../db/rpc-forwards.js';
-import { logger } from '../utils.js';
+import { logger, sleep, isTransientNetworkError } from '../utils.js';
 import type { JsonRpcRequest, JsonRpcResponse } from '../types.js';
+
+const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_ATTEMPTS = 3;
+const RETRY_BASE_MS = 500;
 
 let instance: RpcClient;
 
@@ -23,14 +27,7 @@ export class RpcClient {
 
   async getBlockByNumber(blockNumber: number): Promise<{ parsed: any; rawJson: string } | null> {
     const hex = '0x' + blockNumber.toString(16);
-    const body = { jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: [hex, false] };
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`RPC HTTP error: ${res.status}`);
-    const json = await res.json() as any;
+    const json = await this.post({ jsonrpc: '2.0', id: 1, method: 'eth_getBlockByNumber', params: [hex, false] });
     if (json.error) throw new Error(`RPC error: ${JSON.stringify(json.error)}`);
     await trackRpcCall('eth_getBlockByNumber');
     if (!json.result) return null;
@@ -48,13 +45,7 @@ export class RpcClient {
       params: ['0x' + num.toString(16), false],
     }));
 
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(batchBody),
-    });
-    if (!res.ok) throw new Error(`RPC HTTP error: ${res.status}`);
-    const jsonArray = await res.json() as any[];
+    const jsonArray = await this.post(batchBody) as any[];
 
     for (const json of jsonArray) {
       if (json.error) throw new Error(`RPC error: ${JSON.stringify(json.error)}`);
@@ -80,14 +71,7 @@ export class RpcClient {
       fromBlock: '0x' + fromBlock.toString(16),
       toBlock: '0x' + toBlock.toString(16),
     }];
-    const body = { jsonrpc: '2.0', id: 1, method: 'eth_getLogs', params };
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`RPC HTTP error: ${res.status}`);
-    const json = await res.json() as any;
+    const json = await this.post({ jsonrpc: '2.0', id: 1, method: 'eth_getLogs', params });
     if (json.error) throw new Error(`RPC error: ${JSON.stringify(json.error)}`);
     await trackRpcCall('eth_getLogs');
     const logs = (json.result || []) as any[];
@@ -98,30 +82,55 @@ export class RpcClient {
   }
 
   async forward(req: JsonRpcRequest): Promise<JsonRpcResponse> {
-    const body = { jsonrpc: '2.0', id: req.id, method: req.method, params: req.params || [] };
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      return { jsonrpc: '2.0', id: req.id, error: { code: -32000, message: `Upstream RPC HTTP error: ${res.status}` } };
+    try {
+      const json = await this.post({ jsonrpc: '2.0', id: req.id, method: req.method, params: req.params || [] }) as JsonRpcResponse;
+      await trackForwardedCall(req.method);
+      return { jsonrpc: '2.0', id: req.id, result: json.result, error: json.error };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { jsonrpc: '2.0', id: req.id, error: { code: -32000, message: `Upstream RPC unavailable: ${message}` } };
     }
-    const json = await res.json() as JsonRpcResponse;
-    await trackForwardedCall(req.method);
-    return { jsonrpc: '2.0', id: req.id, result: json.result, error: json.error };
   }
 
   private async call(method: string, params: unknown[] = []): Promise<unknown> {
-    const body = { jsonrpc: '2.0', id: 1, method, params };
-    const res = await fetch(this.rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`RPC HTTP error: ${res.status}`);
-    const json = await res.json() as any;
+    const json = await this.post({ jsonrpc: '2.0', id: 1, method, params });
     if (json.error) throw new Error(`RPC error: ${JSON.stringify(json.error)}`);
     return json.result;
+  }
+
+  // Single entry point for upstream HTTP. Retries transient network errors and
+  // rate-limit/server-error statuses with exponential backoff so one dropped
+  // socket (stale keep-alive, EPIPE, Alchemy hiccup) doesn't fail a poll cycle.
+  private async post(body: unknown): Promise<any> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (attempt > 1) {
+        await sleep(RETRY_BASE_MS * 2 ** (attempt - 2));
+      }
+      try {
+        const res = await fetch(this.rpcUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
+        if (res.status === 429 || res.status >= 500) {
+          res.body?.cancel().catch(() => {});
+          lastErr = new Error(`RPC HTTP error: ${res.status}`);
+          logger.warn(`Upstream RPC returned ${res.status} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+          continue;
+        }
+        if (!res.ok) {
+          res.body?.cancel().catch(() => {});
+          throw new Error(`RPC HTTP error: ${res.status}`);
+        }
+        return await res.json();
+      } catch (err) {
+        if (!isTransientNetworkError(err)) throw err;
+        lastErr = err;
+        logger.warn(`Upstream RPC request failed (attempt ${attempt}/${MAX_ATTEMPTS}):`, err instanceof Error ? `${err.message} (${(err.cause as Error | undefined)?.message ?? 'no cause'})` : err);
+      }
+    }
+    throw lastErr;
   }
 }

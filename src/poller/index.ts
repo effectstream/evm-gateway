@@ -1,5 +1,5 @@
 import type { ContractFilter } from '../types.js';
-import { logger } from '../utils.js';
+import { logger, isTransientNetworkError } from '../utils.js';
 import { getLatestBlockNumber, setLatestBlockNumber } from '../db/chain-state.js';
 import { insertBlock } from '../db/blocks.js';
 import { insertLogs } from '../db/logs.js';
@@ -36,8 +36,16 @@ export class Poller {
     try {
       await this.doPoll();
     } catch (err) {
-      logger.error('Poll cycle failed:', err);
-      process.exit(1);
+      if (isTransientNetworkError(err)) {
+        // Progress is checkpointed per batch via setLatestBlockNumber, so the
+        // next interval tick resumes where this cycle left off.
+        logger.warn('Poll cycle failed (transient network error), retrying next tick:', err);
+      } else {
+        // Non-network errors (e.g. PGlite allocation exhaustion) are stuck
+        // states only a process restart fixes — exit and let systemd restart.
+        logger.error('Poll cycle failed:', err);
+        process.exit(1);
+      }
     } finally {
       this.isRunning = false;
     }
