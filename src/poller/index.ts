@@ -1,5 +1,5 @@
 import type { ContractFilter } from '../types.js';
-import { logger } from '../utils.js';
+import { logger, isTransientNetworkError } from '../utils.js';
 import { getLatestBlockNumber, setLatestBlockNumber } from '../db/chain-state.js';
 import { insertBlock } from '../db/blocks.js';
 import { insertLogs } from '../db/logs.js';
@@ -36,8 +36,12 @@ export class Poller {
     try {
       await this.doPoll();
     } catch (err) {
-      logger.error('Poll cycle failed:', err);
-      process.exit(1);
+      if (isTransientNetworkError(err)) {
+        logger.warn('Poll cycle failed (transient network error), retrying next tick:', err);
+      } else {
+        logger.error('Poll cycle failed:', err);
+        process.exit(1);
+      }
     } finally {
       this.isRunning = false;
     }

@@ -186,13 +186,14 @@ async function runTests() {
   assert(batchRes[1].result !== undefined, 'Batch[1] eth_getBlockByNumber has result');
   assert(Array.isArray(batchRes[2].result), 'Batch[2] eth_getLogs returns array');
 
-  // ─── Test 3: Unsupported method ────────────────────────────────────
+  // ─── Test 3: Uncached methods forward to upstream ──────────────────
 
-  console.log('\n=== Test: Unsupported Method ===');
-  const unsupported = await rpcCall('eth_sendRawTransaction', ['0x00']);
-  assert(unsupported.error !== undefined, 'Unsupported method returns error');
-  assert(unsupported.error?.code === -32601, 'Error code is -32601');
-  assert(unsupported.error?.message === 'Method not supported', 'Error message is correct');
+  console.log('\n=== Test: Uncached Method Forwarding ===');
+  const chainIdRes = await rpcCall('eth_chainId');
+  assert(typeof chainIdRes.result === 'string' && chainIdRes.result.startsWith('0x'), 'eth_chainId forwards upstream and returns hex result');
+  const unknown = await rpcCall('eth_nonexistentMethod');
+  assert(unknown.error !== undefined, 'Unknown method returns error');
+  assert(typeof unknown.error?.code === 'number' && unknown.error.code < 0, 'Unknown method error has upstream error code');
 
   // ─── Test 4: Response format matches real RPC ──────────────────────
 
