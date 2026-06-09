@@ -98,9 +98,7 @@ export class RpcClient {
     return json.result;
   }
 
-  // Single entry point for upstream HTTP. Retries transient network errors and
-  // rate-limit/server-error statuses with exponential backoff so one dropped
-  // socket (stale keep-alive, EPIPE, Alchemy hiccup) doesn't fail a poll cycle.
+  // Single entry point for upstream HTTP. Retries transient network errors
   private async post(body: unknown): Promise<any> {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {

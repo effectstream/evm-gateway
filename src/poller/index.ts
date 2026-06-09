@@ -37,12 +37,8 @@ export class Poller {
       await this.doPoll();
     } catch (err) {
       if (isTransientNetworkError(err)) {
-        // Progress is checkpointed per batch via setLatestBlockNumber, so the
-        // next interval tick resumes where this cycle left off.
         logger.warn('Poll cycle failed (transient network error), retrying next tick:', err);
       } else {
-        // Non-network errors (e.g. PGlite allocation exhaustion) are stuck
-        // states only a process restart fixes — exit and let systemd restart.
         logger.error('Poll cycle failed:', err);
         process.exit(1);
       }
