@@ -3,7 +3,6 @@ import { trackForwardedCall } from '../db/rpc-forwards.js';
 import { logger, sleep, isTransientNetworkError } from '../utils.js';
 import type { JsonRpcRequest, JsonRpcResponse } from '../types.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 500;
 
@@ -99,6 +98,12 @@ export class RpcClient {
   }
 
   // Single entry point for upstream HTTP. Retries transient network errors
+  // (dropped sockets, EPIPE, resets) and 429/5xx with exponential backoff.
+  // Deliberately no request timeout: the poller's synchronous PGlite writes
+  // can starve the event loop and delay an in-flight fetch's completion well
+  // past any fixed deadline, so a timeout aborts healthy slow requests before
+  // they checkpoint and stalls all forward progress. Socket-level failures
+  // (the actual observed errors) reject on their own and are retried here.
   private async post(body: unknown): Promise<any> {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -110,7 +115,6 @@ export class RpcClient {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
         if (res.status === 429 || res.status >= 500) {
           res.body?.cancel().catch(() => {});
