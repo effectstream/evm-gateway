@@ -1,6 +1,10 @@
 import { getDb } from './index.js';
 import type { LogRow } from '../types.js';
 
+// Multi-row insert (5 params/row), chunked under Postgres' 65535 param ceiling.
+// One statement per chunk instead of one per log row — see insertBlocks.
+const LOG_INSERT_CHUNK = 1000;
+
 export async function insertLogs(logs: Array<{
   blockNumber: number;
   logIndex: number;
@@ -10,18 +14,23 @@ export async function insertLogs(logs: Array<{
 }>): Promise<void> {
   if (logs.length === 0) return;
   const db = getDb();
-  for (const log of logs) {
+  for (let i = 0; i < logs.length; i += LOG_INSERT_CHUNK) {
+    const chunk = logs.slice(i, i + LOG_INSERT_CHUNK);
+    const values = chunk
+      .map((_, k) => `($${k * 5 + 1}, $${k * 5 + 2}, $${k * 5 + 3}, $${k * 5 + 4}, $${k * 5 + 5})`)
+      .join(',');
+    const params = chunk.flatMap(log => [
+      log.blockNumber,
+      log.logIndex,
+      log.address,
+      log.topics,
+      log.logJson,
+    ]);
     await db.query(
       `INSERT INTO logs (block_number, log_index, address, topics, log_json)
-       VALUES ($1, $2, $3, $4, $5)
+       VALUES ${values}
        ON CONFLICT (block_number, log_index) DO NOTHING`,
-      [
-        log.blockNumber,
-        log.logIndex,
-        log.address,
-        log.topics,
-        log.logJson,
-      ]
+      params
     );
   }
 }

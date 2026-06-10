@@ -1,14 +1,20 @@
 import type { ContractFilter } from '../types.js';
 import { logger, isTransientNetworkError } from '../utils.js';
 import { getLatestBlockNumber, setLatestBlockNumber } from '../db/chain-state.js';
-import { insertBlock } from '../db/blocks.js';
+import { insertBlocks } from '../db/blocks.js';
 import { insertLogs } from '../db/logs.js';
-import { pruneOldData } from '../db/prune.js';
+import { pruneOldData, vacuum } from '../db/prune.js';
 import { RpcClient } from './rpc-client.js';
+
+// Run prune + VACUUM at most this often. Pruning every poll cycle (every 1s
+// when caught up) churns dead tuples that PGlite never autovacuums; spacing it
+// out keeps bloat in check without DELETEing on every tick.
+const MAINTENANCE_INTERVAL_MS = 5 * 60 * 1000;
 
 export class Poller {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private isRunning = false;
+  private lastMaintenance = 0;
 
   constructor(
     private rpcClient: RpcClient,
@@ -82,7 +88,13 @@ export class Poller {
       }
     }
 
-    await pruneOldData(currentBlock, this.retentionBlocks);
+    // Prune + VACUUM on an interval, not every cycle (PGlite has no autovacuum).
+    const now = Date.now();
+    if (now - this.lastMaintenance >= MAINTENANCE_INTERVAL_MS) {
+      this.lastMaintenance = now;
+      await pruneOldData(currentBlock, this.retentionBlocks);
+      await vacuum();
+    }
 
     const count = currentBlock - startBlock + 1;
     logger.info(`Synced blocks ${startBlock}-${currentBlock} (${count} new)`);
@@ -95,14 +107,16 @@ export class Poller {
       const batchEnd = Math.min(i + Poller.RPC_BATCH_SIZE - 1, endBlock);
       const blockNums = Array.from({ length: batchEnd - i + 1 }, (_, k) => i + k);
       const blocks = await this.rpcClient.getBlocksByNumber(blockNums);
+      const rows: Array<{ number: number; headerJson: string }> = [];
       for (const num of blockNums) {
         const rawJson = blocks.get(num);
         if (!rawJson) {
           logger.warn(`Block ${num} returned null from RPC`);
           continue;
         }
-        await insertBlock({ number: num, headerJson: rawJson });
+        rows.push({ number: num, headerJson: rawJson });
       }
+      await insertBlocks(rows);
     }
 
     const byTopic = new Map<string, string[]>();
