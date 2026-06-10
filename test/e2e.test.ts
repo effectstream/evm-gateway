@@ -9,6 +9,7 @@
 
 import { loadConfig } from '../src/config.js';
 import { initDb } from '../src/db/index.js';
+import { initChainCache } from '../src/db/chain-state.js';
 import { getRpcCosts } from '../src/db/rpc-costs.js';
 import { RpcClient } from '../src/poller/rpc-client.js';
 import { Poller } from '../src/poller/index.js';
@@ -115,6 +116,7 @@ async function runTests() {
   // Boot service with test-specific DB and port
   const testDbPath = './data/test-e2e';
   const db = await initDb(testDbPath);
+  await initChainCache();
   const rpcClient = new RpcClient(config.rpcUrl);
   const poller = new Poller(rpcClient, config.contracts, 1000);
   poller.start();

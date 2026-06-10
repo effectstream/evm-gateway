@@ -1,5 +1,6 @@
 import { loadConfig } from './config.js';
 import { initDb } from './db/index.js';
+import { initChainCache } from './db/chain-state.js';
 import { RpcClient } from './poller/rpc-client.js';
 import { Poller } from './poller/index.js';
 import { createServer } from './server/index.js';
@@ -12,6 +13,7 @@ async function main() {
   logger.info(`Starting ETH RPC Cache for ${config.networkName}`);
 
   const db = await initDb(config.dbPath);
+  await initChainCache();
   logger.info(`Database initialized at ${config.dbPath}`);
 
   const rpcClient = new RpcClient(config.rpcUrl);

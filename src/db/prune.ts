@@ -1,4 +1,5 @@
 import { getDb } from './index.js';
+import { setOldestFloor } from './chain-state.js';
 import { logger } from '../utils.js';
 
 export async function pruneOldData(currentBlock: number, retentionBlocks: number): Promise<void> {
@@ -15,6 +16,14 @@ export async function pruneOldData(currentBlock: number, retentionBlocks: number
   const blocksDeleted = blocksResult.affectedRows ?? 0;
   if (blocksDeleted > 0 || logsDeleted > 0) {
     logger.info(`Pruned ${blocksDeleted} blocks and ${logsDeleted} logs below block ${cutoff}`);
+  }
+
+  // The floor moved — refresh the cached oldest from the exact value. This is an
+  // index scan (first leaf of the PK), runs only on prune (~every 5 min), and
+  // keeps the per-request reads off the MIN aggregate.
+  if (blocksDeleted > 0) {
+    const r = await db.query<{ min: string | null }>(`SELECT MIN(number) AS min FROM blocks`);
+    setOldestFloor(r.rows[0]?.min != null ? parseInt(r.rows[0].min, 10) : null);
   }
 }
 
