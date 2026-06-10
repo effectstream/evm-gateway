@@ -1,6 +1,6 @@
 import type { ContractFilter } from '../types.js';
 import { logger, isTransientNetworkError } from '../utils.js';
-import { getLatestBlockNumber, setLatestBlockNumber } from '../db/chain-state.js';
+import { getLatestBlockNumber, setLatestBlockNumber, noteOldestFloor } from '../db/chain-state.js';
 import { insertBlocks } from '../db/blocks.js';
 import { insertLogs } from '../db/logs.js';
 import { pruneOldData, vacuum } from '../db/prune.js';
@@ -117,6 +117,8 @@ export class Poller {
         rows.push({ number: num, headerJson: rawJson });
       }
       await insertBlocks(rows);
+      // rows are ascending; the first lowers the cached floor on a fresh DB.
+      if (rows.length > 0) noteOldestFloor(rows[0].number);
     }
 
     const byTopic = new Map<string, string[]>();
