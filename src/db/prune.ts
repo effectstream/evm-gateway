@@ -17,3 +17,15 @@ export async function pruneOldData(currentBlock: number, retentionBlocks: number
     logger.info(`Pruned ${blocksDeleted} blocks and ${logsDeleted} logs below block ${cutoff}`);
   }
 }
+
+// PGlite runs Postgres in single-user mode with no autovacuum background
+// worker, so dead tuples from pruning are never reclaimed automatically and
+// the heap bloats without bound. A plain VACUUM (no exclusive lock, no file
+// shrink) returns dead space to the freelist so subsequent inserts reuse it
+// instead of extending the files — this keeps the on-disk size stable after a
+// one-time VACUUM FULL reset. Must run outside a transaction.
+export async function vacuum(): Promise<void> {
+  const db = getDb();
+  await db.query(`VACUUM blocks`);
+  await db.query(`VACUUM logs`);
+}
